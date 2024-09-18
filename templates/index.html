@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Job Listings</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script> <!-- Import Chart.js -->
+    <style>
+        #report-section {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+        }
+
+        #report-table {
+            width: 325px;
+        }
+
+        #salaryChart {
+            width: 48%;
+            height: 400px !important;
+        }
+    </style>
+</head>
+<body>
+    <h1>Job Listings</h1>
+    <button id="run-process-btn">Run Process</button>
+    <script>
+        document.addEventListener("DOMContentLoaded", function () {
+            const runProcessBtn = document.getElementById('run-process-btn');
+    
+            // Function to handle running the process
+            function runProcess() {
+                fetch('/start-process')
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success) {
+                            alert(data.message);  // Display success message
+                        } else {
+                            alert('Error: ' + data.message);  // Display error message
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error:', error);
+                        alert('An error occurred while running the process.');
+                    });
+            }
+    
+            // Attach event listener to the run process button
+            runProcessBtn.addEventListener('click', runProcess);
+        });
+    </script>
+    
+    <!-- Save Data Button -->
+    <button id="save-data-btn">Save Data</button>
+
+    <!-- Display total number of jobs -->
+    <p>Total Jobs: <span id="total-jobs">0</span></p>
+
+    <!-- Dropdown filters -->
+    <label for="carreras-select">Carreras:</label>
+    <select id="carreras-select">
+        <option value="">All</option>
+    </select>
+
+    <label for="departamento-select">Departamento:</label>
+    <select id="departamento-select">
+        <option value="">All</option>
+    </select>
+
+    <label for="contratacion-select">Tipo de Contratación:</label>
+    <select id="contratacion-select">
+        <option value="">All</option>
+    </select>
+
+    <!-- Experience Range Inputs -->
+    <label for="min-experiencia">Nivel de Experiencia Mínimo:</label>
+    <input type="number" id="min-experiencia" placeholder="Min Years" min="0" />
+
+    <label for="max-experiencia">Nivel de Experiencia Máximo:</label>
+    <input type="number" id="max-experiencia" placeholder="Max Years" min="0" />
+
+    <!-- Salary Range Inputs -->
+    <label for="min-salario">Salario Mínimo (USD):</label>
+    <input type="number" id="min-salario" placeholder="Min Salary" />
+
+    <label for="max-salario">Salario Máximo (USD):</label>
+    <input type="number" id="max-salario" placeholder="Max Salary" />
+
+    <!-- Generate Report Button -->
+    <button id="generate-report-btn">Generate Report</button>
+
+    <!-- Report Section (Table and Chart Side by Side) -->
+    <div id="report-section">
+        <!-- Report Table -->
+        <div>
+            <h2>Career Summary Report</h2>
+            <table id="report-table" border="1">
+                <thead>
+                    <tr>
+                        <th>Carrera</th>
+                        <th>Total Jobs</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+
+        <!-- Bar Chart for Average Salary -->
+        <div>
+            <h2>Average Salary per Career</h2>
+            <canvas id="salaryChart"></canvas>
+        </div>
+    </div>
+
+    <!-- Jobs Table -->
+    <h2>Filtered Job Listings</h2>
+    <table id="jobs-table" border="1">
+        <thead>
+            <tr>
+                <th>Title</th>
+                <th>Departamento</th>
+                <th>Tipo de Contratación</th>
+                <th>Nivel de Experiencia</th>
+                <th>Salario Mínimo</th>
+                <th>Carreras</th>
+            </tr>
+        </thead>
+        <tbody></tbody>
+    </table>
+
+    <!-- JavaScript -->
+    <script>
+        document.addEventListener("DOMContentLoaded", function () {
+            const carrerasSelect = document.getElementById('carreras-select');
+            const departamentoSelect = document.getElementById('departamento-select');
+            const contratacionSelect = document.getElementById('contratacion-select');
+            const minExperienciaInput = document.getElementById('min-experiencia');
+            const maxExperienciaInput = document.getElementById('max-experiencia');
+            const minSalarioInput = document.getElementById('min-salario');
+            const maxSalarioInput = document.getElementById('max-salario');
+            const generateReportBtn = document.getElementById('generate-report-btn');
+            const saveDataBtn = document.getElementById('save-data-btn');
+            const jobsTableBody = document.querySelector('#jobs-table tbody');
+            const reportTableBody = document.querySelector('#report-table tbody');
+            const totalJobsElement = document.getElementById('total-jobs');
+            let chartInstance = null;
+
+            let jobsData = [];
+
+            // Function to load JSON data from a file
+            function loadJobsFromFile() {
+                fetch('/static/jobs_data_categorized.json') // Path to your JSON file
+                    .then(response => response.json())
+                    .then(data => {
+                        jobsData = data;
+                        populateDropdowns(jobsData);
+                        displayJobs(jobsData);
+
+                        // Attach event listeners for filtering
+                        carrerasSelect.addEventListener('change', () => filterJobs(jobsData));
+                        departamentoSelect.addEventListener('change', () => filterJobs(jobsData));
+                        contratacionSelect.addEventListener('change', () => filterJobs(jobsData));
+                        minExperienciaInput.addEventListener('input', () => filterJobs(jobsData));
+                        maxExperienciaInput.addEventListener('input', () => filterJobs(jobsData));
+                        minSalarioInput.addEventListener('input', () => filterJobs(jobsData));
+                        maxSalarioInput.addEventListener('input', () => filterJobs(jobsData));
+
+                        // Attach event listener for the report generation button
+                        generateReportBtn.addEventListener('click', () => generateReport(jobsData));
+                    })
+                    .catch(error => {
+                        console.error("Error loading the JSON file:", error);
+                    });
+            }
+
+            // Function to populate dropdowns with unique options
+            function populateDropdowns(jobsData) {
+                const carrerasOptions = new Set();
+                const departamentoOptions = new Set();
+                const contratacionOptions = new Set();
+
+                jobsData.forEach(job => {
+                    if (job.Carreras.length > 0) {
+                        job.Carreras.forEach(carrera => carrerasOptions.add(carrera));
+                    } else {
+                        carrerasOptions.add('Sin especificar');
+                    }
+
+                    departamentoOptions.add(job.Departamento);
+                    contratacionOptions.add(job["Tipo de Contratación"]);
+                });
+
+                // Populate Carreras dropdown
+                carrerasOptions.forEach(option => {
+                    const optionElement = document.createElement('option');
+                    optionElement.value = option;
+                    optionElement.textContent = option;
+                    carrerasSelect.appendChild(optionElement);
+                });
+
+                // Populate Departamento dropdown
+                departamentoOptions.forEach(option => {
+                    const optionElement = document.createElement('option');
+                    optionElement.value = option;
+                    optionElement.textContent = option;
+                    departamentoSelect.appendChild(optionElement);
+                });
+
+                // Populate Tipo de Contratación dropdown
+                contratacionOptions.forEach(option => {
+                    const optionElement = document.createElement('option');
+                    optionElement.value = option;
+                    optionElement.textContent = option;
+                    contratacionSelect.appendChild(optionElement);
+                });
+            }
+
+            // Function to filter and display jobs based on user selections
+            function filterJobs(jobsData) {
+                const carreraFilter = carrerasSelect.value;
+                const departamentoFilter = departamentoSelect.value;
+                const contratacionFilter = contratacionSelect.value;
+                const minExperienciaFilter = minExperienciaInput.value ? parseInt(minExperienciaInput.value, 10) : null;
+                const maxExperienciaFilter = maxExperienciaInput.value ? parseInt(maxExperienciaInput.value, 10) : null;
+                const minSalarioFilter = minSalarioInput.value ? parseInt(minSalarioInput.value, 10) : null;
+                const maxSalarioFilter = maxSalarioInput.value ? parseInt(maxSalarioInput.value, 10) : null;
+
+                const filteredJobs = jobsData.filter(job => {
+                    const carreraMatches = carreraFilter === "" || (job.Carreras.length > 0 ? job.Carreras.includes(carreraFilter) : carreraFilter === 'Sin especificar');
+                    const departamentoMatches = departamentoFilter === "" || job.Departamento === departamentoFilter;
+                    const contratacionMatches = contratacionFilter === "" || job["Tipo de Contratación"] === contratacionFilter;
+
+                    // Handle experience range filtering
+                    const experiencia = job["Nivel de Experiencia"];
+                    const experienciaMatches = (!minExperienciaFilter || experiencia >= minExperienciaFilter) &&
+                                               (!maxExperienciaFilter || experiencia <= maxExperienciaFilter);
+
+                    // Filter salary range
+                    const minSalario = job["Salario Mínimo (USD)"] !== 'N/A' ? parseInt(job["Salario Mínimo (USD)"], 10) : null;
+                    const maxSalario = job["Salario Máximo (USD)"] !== 'N/A' ? parseInt(job["Salario Máximo (USD)"], 10) : null;
+                    const salarioMatches = (!minSalarioFilter || (minSalario !== null && minSalario >= minSalarioFilter)) &&
+                                           (!maxSalarioFilter || (maxSalario !== null && maxSalario <= maxSalarioFilter));
+
+                    return carreraMatches && departamentoMatches && contratacionMatches && experienciaMatches && salarioMatches;
+                });
+
+                // Update total jobs count
+                totalJobsElement.textContent = filteredJobs.length;
+
+                // Display filtered jobs in the table
+                displayJobs(filteredJobs);
+
+                return filteredJobs; // Return filtered jobs for saving
+            }
+
+            // Function to display jobs in the table
+            function displayJobs(jobs) {
+                jobsTableBody.innerHTML = '';
+                jobs.forEach(job => {
+                    const row = document.createElement('tr');
+                    row.innerHTML = `
+                        <td>${job.Title}</td>
+                        <td>${job.Departamento}</td>
+                        <td>${job["Tipo de Contratación"]}</td>
+                        <td>${job["Nivel de Experiencia"]}</td>
+                        <td>${job["Salario Mínimo (USD)"] || 'N/A'}</td>
+                        <td>${job.Carreras.length > 0 ? job.Carreras.join(', ') : 'Sin especificar'}</td>
+                    `;
+                    jobsTableBody.appendChild(row);
+                });
+            }
+
+            // Function to generate report and display it in a table and bar chart
+            function generateReport(jobsData) {
+                const filteredJobs = filterJobs(jobsData); // Filter jobs based on current filters
+
+                // Generate summary for the report
+                const carreraSummary = {};
+                const carreraSalaries = {};
+
+                filteredJobs.forEach(job => {
+                    const carreraList = job.Carreras.length > 0 ? job.Carreras : ['Sin especificar'];
+                    carreraList.forEach(carrera => {
+                        // Count jobs per career
+                        carreraSummary[carrera] = (carreraSummary[carrera] || 0) + 1;
+
+                        // Sum salaries per career for averaging later
+                        if (!carreraSalaries[carrera]) {
+                            carreraSalaries[carrera] = { totalSalario: 0, count: 0 };
+                        }
+                        const minSalario = job["Salario Mínimo (USD)"] !== 'N/A' ? parseInt(job["Salario Mínimo (USD)"], 10) : null;
+                        if (minSalario !== null) {
+                            carreraSalaries[carrera].totalSalario += minSalario;
+                            carreraSalaries[carrera].count += 1;
+                        }
+                    });
+                });
+
+                // Update Report Table
+                reportTableBody.innerHTML = '';
+                Object.keys(carreraSummary).forEach(carrera => {
+                    const row = document.createElement('tr');
+                    row.innerHTML = `
+                        <td>${carrera}</td>
+                        <td>${carreraSummary[carrera]}</td>
+                    `;
+                    reportTableBody.appendChild(row);
+                });
+
+                // Generate Bar Chart for Average Salaries
+                const careerLabels = [];
+                const averageSalaries = [];
+                Object.keys(carreraSalaries).forEach(carrera => {
+                    careerLabels.push(carrera);
+                    const averageSalary = carreraSalaries[carrera].totalSalario / carreraSalaries[carrera].count;
+                    averageSalaries.push(averageSalary.toFixed(2));
+                });
+
+                // Update the bar chart with new data
+                if (chartInstance) {
+                    chartInstance.destroy(); // Destroy the previous chart instance
+                }
+
+                const ctx = document.getElementById('salaryChart').getContext('2d');
+                chartInstance = new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: careerLabels,
+                        datasets: [{
+                            label: 'Average Salary (USD)',
+                            data: averageSalaries,
+                            backgroundColor: 'rgba(54, 162, 235, 0.2)',
+                            borderColor: 'rgba(54, 162, 235, 1)',
+                            borderWidth: 1
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        scales: {
+                            y: {
+                                beginAtZero: true
+                            }
+                        }
+                    }
+                });
+            }
+
+            // Function to format the current date as ddMMYYYY
+            function getCurrentDateFormatted() {
+                const today = new Date();
+                const day = String(today.getDate()).padStart(2, '0');
+                const month = String(today.getMonth() + 1).padStart(2, '0'); // Months are zero-based
+                const year = today.getFullYear();
+                return `${day}${month}${year}`;
+            }
+
+            // Function to save the filtered jobs to a JSON file
+            function saveData() {
+                const filename = `jobData_${getCurrentDateFormatted()}.json`;
+                const filteredJobs = filterJobs(jobsData); // Get filtered jobs
+                
+                // Create a Blob from the data and create a downloadable link
+                const blob = new Blob([JSON.stringify(filteredJobs, null, 2)], { type: 'application/json' });
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(blob);
+                link.download = filename;
+
+                // Append the link to the body and trigger download, then remove the link
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+            }
+
+            // Attach event listener to save data button
+            saveDataBtn.addEventListener('click', saveData);
+
+            // Load the jobs when the page is ready
+            loadJobsFromFile();
+        });
+    </script>
+</body>
+</html>
